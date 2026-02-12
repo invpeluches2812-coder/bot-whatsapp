@@ -1,4 +1,4 @@
-   import os
+import os
 import json
 import time
 import requests
@@ -90,7 +90,6 @@ def gestionar_humano(numero, nombre, pais):
         enviar(NUMERO_ADMIN, "text", f"💤 *LEAD NOCTURNO*\n👤 {nombre}")
 
 # --- RUTAS PRINCIPALES ---
-# Definimos funciones de menús aquí para ahorrar espacio en el bloque principal
 def menu_pais(telefono, nombre):
     enviar(telefono, "audio", AUDIO_SALUDO)
     time.sleep(1)
@@ -143,7 +142,6 @@ def recibir():
                     gestionar_humano(numero, nombre, "General")
                 
                 # 3. MODO REPETIDOR (Para códigos de Instagram/Facebook)
-                # Si no es saludo ni pide humano, asumimos que es algo importante y TE LO ENVÍA A TI
                 else:
                     mensaje_real = msg["text"]["body"]
                     # Evitamos reenviarte tus propios mensajes si pruebas contigo mismo
@@ -198,4 +196,3 @@ def recibir():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
- 
