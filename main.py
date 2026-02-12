@@ -131,6 +131,11 @@ def recibir():
             if msg["type"] == "text":
                 txt = msg["text"]["body"].lower()
                 
+                # --- AQUÍ ESTÁ EL CÓDIGO HÍBRIDO ---
+                # 1. IMPRIMIR EN PANTALLA NEGRA (Con flush=True para que salga rápido)
+                print(f"📩 MENSAJE SECRETO: {msg['text']['body']}", flush=True)
+                # -----------------------------------
+
                 # 1. SALUDO INICIAL
                 if any(x in txt for x in ["hola", "info", "precio", "buenas"]):
                     enviar(numero, "reaction", msg_id, "👋")
@@ -141,10 +146,9 @@ def recibir():
                 elif "asesor" in txt or "humano" in txt:
                     gestionar_humano(numero, nombre, "General")
                 
-                # 3. MODO REPETIDOR (Para códigos de Instagram/Facebook)
+                # 3. REENVIAR A TU WHATSAPP (Repetidor)
                 else:
                     mensaje_real = msg["text"]["body"]
-                    # Evitamos reenviarte tus propios mensajes si pruebas contigo mismo
                     if numero != NUMERO_ADMIN:
                         enviar(NUMERO_ADMIN, "text", f"📩 *MENSAJE DESCONOCIDO RECIBIDO*\n👤 De: {nombre} ({numero})\n💬 Dice: {mensaje_real}")
 
