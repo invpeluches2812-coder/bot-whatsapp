@@ -9,29 +9,35 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# --- VARIABLES DE ENTORNO ---
+# --- VARIABLES DE ENTORNO (Configuradas en Render) ---
 TOKEN_WHATSAPP = os.environ.get("TOKEN_WHATSAPP")
 NUMERO_ID = os.environ.get("NUMERO_ID")  
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 GOOGLE_JSON = os.environ.get("GOOGLE_CREDENTIALS")
 
-# --- CONFIGURACIÓN ---
+# ==========================================
+#      ZONA DE EDICIÓN (PELUCHES MARKETING)
+# ==========================================
 BASE_URL = "https://raw.githubusercontent.com/invpeluches2812-coder/bot-whatsapp/main/multimedia"
 IMG_LOGO = f"{BASE_URL}/logo.jpg"
 AUDIO_SALUDO = f"{BASE_URL}/saludo.mp3"
+
 IMG_INI_VE = f"{BASE_URL}/plan_ini_ve.jpg"
 IMG_MED_VE = f"{BASE_URL}/plan_med_ve.jpg"
 IMG_AVA_VE = f"{BASE_URL}/plan_ava_ve.jpg"
+
 IMG_INI_CL = f"{BASE_URL}/plan_ini_cl.jpg"
 IMG_MED_CL = f"{BASE_URL}/plan_med_cl.jpg"
 IMG_AVA_CL = f"{BASE_URL}/plan_ava_cl.jpg"
+
 IMG_DISENO = f"{BASE_URL}/catalogo_diseno.jpg" 
-
-# TU NÚMERO PERSONAL (Aquí llegarán los códigos)
 NUMERO_ADMIN = "584265168669" 
+# ==========================================
 
-# --- FUNCIONES ---
+# --- MEMORIA DEL BOT (Evita repeticiones de Meta) ---
 usuarios_activos = {}
+mensajes_procesados = [] # Lista para recordar IDs de mensajes ya respondidos
+
 def es_spam(telefono):
     ahora = time.time()
     ultimo = usuarios_activos.get(telefono, 0)
@@ -39,6 +45,7 @@ def es_spam(telefono):
     usuarios_activos[telefono] = ahora
     return False
 
+# --- CRM GOOGLE SHEETS ---
 def registrar_lead(nombre, telefono, pais, interes):
     try:
         if not GOOGLE_JSON: return
@@ -47,13 +54,20 @@ def registrar_lead(nombre, telefono, pais, interes):
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         sheet = client.open("Clientes_Bot").sheet1
+        
         hora_vzla = datetime.utcnow() - timedelta(hours=4)
-        sheet.append_row([hora_vzla.strftime("%Y-%m-%d"), hora_vzla.strftime("%H:%M:%S"), nombre, telefono, pais, interes])
-    except Exception as e: print(f"Error Sheets: {e}")
+        fecha = hora_vzla.strftime("%Y-%m-%d")
+        hora = hora_vzla.strftime("%H:%M:%S")
+        
+        sheet.append_row([fecha, hora, nombre, telefono, pais, interes])
+        print(f"✅ Lead guardado: {nombre}")
+    except Exception as e:
+        print(f"❌ Error Sheets: {e}")
 
+# --- HERRAMIENTAS ---
 def es_horario_laboral():
-    hora = (datetime.utcnow() - timedelta(hours=4)).hour
-    return 8 <= hora < 22
+    hora_actual = (datetime.utcnow() - timedelta(hours=4)).hour
+    return 8 <= hora_actual < 22
 
 def enviar(telefono, tipo, contenido, caption=None):
     url = f"https://graph.facebook.com/v19.0/{NUMERO_ID}/messages"
@@ -61,7 +75,7 @@ def enviar(telefono, tipo, contenido, caption=None):
     data = {"messaging_product": "whatsapp", "to": telefono, "type": tipo}
     
     if tipo == "text": data["text"] = {"body": contenido}
-    elif tipo == "image": 
+    elif tipo == "image":
         data["image"] = {"link": contenido}
         if caption: data["image"]["caption"] = caption
     elif tipo == "audio": data["audio"] = {"link": contenido}
@@ -71,52 +85,78 @@ def enviar(telefono, tipo, contenido, caption=None):
         data["reaction"] = {"message_id": contenido, "emoji": caption}
 
     try: requests.post(url, headers=headers, json=data)
-    except: pass
+    except Exception as e: print(f"❌ Error request: {e}")
 
 def marcar_leido(msg_id):
     url = f"https://graph.facebook.com/v19.0/{NUMERO_ID}/messages"
     headers = {"Authorization": f"Bearer {TOKEN_WHATSAPP}", "Content-Type": "application/json"}
     try: requests.post(url, headers=headers, json={"messaging_product": "whatsapp", "status": "read", "message_id": msg_id})
-    except: pass
+    except Exception: pass
+
+# --- MENÚS DEL BOT ---
+def menu_pais(telefono, nombre):
+    enviar(telefono, "audio", AUDIO_SALUDO)
+    time.sleep(1) 
+    enviar(telefono, "image", IMG_LOGO)
+    
+    botones = {
+        "type": "button",
+        "body": {"text": f"👋 *¡Hola {nombre}!* Gracias por escribir a Peluches Marketing.\n\nPara mostrarte los precios y moneda correcta, selecciona tu ubicación 👇"},
+        "action": {"buttons": [{"type": "reply", "reply": {"id": "pais_ve", "title": "🇻🇪 Venezuela"}}, {"type": "reply", "reply": {"id": "pais_cl", "title": "🇨🇱 Chile"}}]}
+    }
+    enviar(telefono, "interactive", botones)
+
+def menu_servicios(telefono, pais_code):
+    bandera = "🇻🇪" if pais_code == "ve" else "🇨🇱"
+    botones = {
+        "type": "button",
+        "body": {"text": f"{bandera} *Menú {pais_code.upper()}*\nSelecciona qué deseas cotizar:"},
+        "action": {"buttons": [{"type": "reply", "reply": {"id": f"mkt_{pais_code}", "title": "📱 Redes Sociales"}}, {"type": "reply", "reply": {"id": f"dsn_{pais_code}", "title": "🎨 Diseño Gráfico"}}, {"type": "reply", "reply": {"id": f"inf_{pais_code}", "title": "❓ Info Pagos"}}]}
+    }
+    enviar(telefono, "interactive", botones)
+
+def submenu_planes_redes(telefono, pais_code):
+    bandera = "🇻🇪" if pais_code == "ve" else "🇨🇱"
+    botones = {
+        "type": "button",
+        "body": {"text": f"{bandera} *Planes de Redes Sociales*\n\nManejamos 3 estrategias integrales. Toca cada botón para ver qué incluye 👇"},
+        "action": {"buttons": [{"type": "reply", "reply": {"id": f"plan_ini_{pais_code}", "title": "🌱 Plan Inicial"}}, {"type": "reply", "reply": {"id": f"plan_med_{pais_code}", "title": "🚀 Plan Medio"}}, {"type": "reply", "reply": {"id": f"plan_ava_{pais_code}", "title": "💎 Plan Avanzado"}}]}
+    }
+    enviar(telefono, "interactive", botones)
+
+def botones_navegacion(telefono, pais_code):
+    botones = {
+        "type": "button",
+        "body": {"text": "¿Qué deseas hacer ahora?"},
+        "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{pais_code}", "title": "🙋 Contratar/Dudas"}}, {"type": "reply", "reply": {"id": f"mkt_{pais_code}", "title": "🔙 Ver Otros Planes"}}]}
+    }
+    enviar(telefono, "interactive", botones)
 
 def gestionar_humano(numero, nombre, pais):
     registrar_lead(nombre, numero, pais, "🚨 Pidió Asesor")
     link = f"https://wa.me/{NUMERO_ADMIN}"
+    
     if es_horario_laboral():
-        enviar(numero, "text", f"✅ He avisado a mi director. Escribe aquí si es urgente: {link}")
-        enviar(NUMERO_ADMIN, "text", f"🚨 *LEAD {pais.upper()}*\n👤 {nombre}\n📱 {numero}\n💬 Pide humano.")
+        enviar(numero, "text", f"✅ He avisado a mi director.\nSi deseas atención inmediata, escribe directo aquí: {link}")
+        enviar(NUMERO_ADMIN, "text", f"🚨 *NUEVO LEAD {pais.upper()}*\n👤 {nombre}\n📱 {numero}\n💬 Quiere hablar con un humano.")
     else:
-        enviar(numero, "text", f"🌙 Estamos descansando. Te escribiremos mañana. Urgencias: {link}")
-        enviar(NUMERO_ADMIN, "text", f"💤 *LEAD NOCTURNO*\n👤 {nombre}")
+        enviar(numero, "text", f"🌙 En este momento estamos descansando, pero ya dejé tu nota. Te escribiremos mañana a primera hora.\n\nSi es urgente: {link}")
+        enviar(NUMERO_ADMIN, "text", f"💤 *LEAD NOCTURNO*\n👤 {nombre} ({numero})")
 
-# --- RUTAS PRINCIPALES ---
-def menu_pais(telefono, nombre):
-    enviar(telefono, "audio", AUDIO_SALUDO)
-    time.sleep(1)
-    enviar(telefono, "image", IMG_LOGO)
-    btns = {"type": "button", "body": {"text": f"👋 Hola {nombre}. Selecciona tu país:"}, "action": {"buttons": [{"type": "reply", "reply": {"id": "pais_ve", "title": "🇻🇪 Venezuela"}}, {"type": "reply", "reply": {"id": "pais_cl", "title": "🇨🇱 Chile"}}]}}
-    enviar(telefono, "interactive", btns)
-
-def menu_servicios(telefono, pais_code):
-    bandera = "🇻🇪" if pais_code == "ve" else "🇨🇱"
-    btns = {"type": "button", "body": {"text": f"{bandera} Menú {pais_code.upper()}"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"mkt_{pais_code}", "title": "📱 Redes"}}, {"type": "reply", "reply": {"id": f"dsn_{pais_code}", "title": "🎨 Diseño"}}, {"type": "reply", "reply": {"id": f"inf_{pais_code}", "title": "❓ Pagos"}}]}}
-    enviar(telefono, "interactive", btns)
-
-def submenu_planes(telefono, pais):
-    btns = {"type": "button", "body": {"text": "Planes Redes"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"plan_ini_{pais}", "title": "🌱 Inicial"}}, {"type": "reply", "reply": {"id": f"plan_med_{pais}", "title": "🚀 Medio"}}, {"type": "reply", "reply": {"id": f"plan_ava_{pais}", "title": "💎 Avanzado"}}]}}
-    enviar(telefono, "interactive", btns)
-
-# --- SERVIDOR ---
+# --- SERVIDOR FLASK ---
 @app.route("/webhook", methods=["GET"])
 def verificar():
-    if request.args.get("hub.verify_token") == VERIFY_TOKEN: return request.args.get("hub.challenge"), 200
-    return "Error", 403
+    if request.args.get("hub.verify_token") == VERIFY_TOKEN:
+        return request.args.get("hub.challenge"), 200
+    return "Error de verificación", 403
 
 @app.route("/webhook", methods=["POST"])
 def recibir():
     try:
         body = request.json
-        if not body or "entry" not in body: return jsonify({"status": "error"}), 400
+        if not body or "entry" not in body:
+            return jsonify({"status": "error", "message": "No entry found"}), 400
+
         entry = body["entry"][0]["changes"][0]["value"]
         
         if "messages" in entry:
@@ -125,78 +165,91 @@ def recibir():
             msg_id = msg["id"]
             nombre = entry["contacts"][0]["profile"]["name"]
             
-            if es_spam(numero): return "OK", 200
+            # 🛑 1. FILTRO ANTI-REPETICIÓN DE META
+            global mensajes_procesados
+            if msg_id in mensajes_procesados:
+                return jsonify({"status": "ignored", "reason": "duplicate"}), 200
+            
+            # Guardamos el ID en la memoria
+            mensajes_procesados.append(msg_id)
+            if len(mensajes_procesados) > 500:
+                mensajes_procesados.pop(0) # Limpiamos memoria para que no se llene el servidor
+            
+            # 🛑 2. FILTRO ANTI-SPAM DEL USUARIO
+            if es_spam(numero): return "Spam", 200
+            
             marcar_leido(msg_id)
 
             if msg["type"] == "text":
                 txt = msg["text"]["body"].lower()
-                
-                # --- AQUÍ ESTÁ EL CÓDIGO HÍBRIDO ---
-                # 1. IMPRIMIR EN PANTALLA NEGRA (Con flush=True para que salga rápido)
-                print(f"📩 MENSAJE SECRETO: {msg['text']['body']}", flush=True)
-                # -----------------------------------
-
-                # 1. SALUDO INICIAL
-                if any(x in txt for x in ["hola", "info", "precio", "buenas"]):
+                if any(x in txt for x in ["hola", "info", "buenas", "precio", "cotizar", "buenos"]):
                     enviar(numero, "reaction", msg_id, "👋")
                     menu_pais(numero, nombre)
                     registrar_lead(nombre, numero, "Inicio", "Saludo")
-                
-                # 2. PEDIR HUMANO
                 elif "asesor" in txt or "humano" in txt:
                     gestionar_humano(numero, nombre, "General")
-                
-                # 3. REENVIAR A TU WHATSAPP (Repetidor)
-                else:
-                    mensaje_real = msg["text"]["body"]
-                    if numero != NUMERO_ADMIN:
-                        enviar(NUMERO_ADMIN, "text", f"📩 *MENSAJE DESCONOCIDO RECIBIDO*\n👤 De: {nombre} ({numero})\n💬 Dice: {mensaje_real}")
 
             elif msg["type"] == "interactive":
-                btn = msg["interactive"]["button_reply"]["id"]
+                btn_id = msg["interactive"]["button_reply"]["id"]
                 enviar(numero, "reaction", msg_id, "✅")
 
-                if btn == "pais_ve": 
+                if btn_id == "pais_ve": 
                     menu_servicios(numero, "ve")
                     registrar_lead(nombre, numero, "Venezuela", "Selección País")
-                elif btn == "pais_cl": 
+                elif btn_id == "pais_cl": 
                     menu_servicios(numero, "cl")
                     registrar_lead(nombre, numero, "Chile", "Selección País")
-                
-                elif "mkt_" in btn:
-                    pais = "ve" if "_ve" in btn else "cl"
-                    submenu_planes(numero, pais)
 
-                elif "plan_" in btn:
-                    pais = "ve" if "_ve" in btn else "cl"
-                    img = IMG_INI_VE if "_ini_" in btn and pais == "ve" else (IMG_INI_CL if "_ini_" in btn else (IMG_MED_VE if "_med_" in btn and pais == "ve" else (IMG_MED_CL if "_med_" in btn else (IMG_AVA_VE if "_ava_" in btn and pais == "ve" else IMG_AVA_CL))))
-                    enviar(numero, "image", img, caption="Mira el detalle en la imagen 👆")
-                    botones = {"type": "button", "body": {"text": "¿Qué deseas hacer?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{pais}", "title": "🙋 Contratar"}}]}}
+                elif "mkt_" in btn_id:
+                    pais = "ve" if "_ve" in btn_id else "cl"
+                    submenu_planes_redes(numero, pais)
+
+                elif "plan_" in btn_id:
+                    pais_nombre = "Venezuela" if "_ve" in btn_id else "Chile"
+                    pais_code = "ve" if "_ve" in btn_id else "cl"
+                    
+                    if "_ini_" in btn_id:
+                        img = IMG_INI_VE if pais_code == "ve" else IMG_INI_CL
+                        texto = f"🌱 *Plan Inicial ({pais_nombre})*\n\n✅ 3 Posts semanales\n✅ 2 Historias semanales\n✅ Copy + Diseños + Perfil\n\n👇 *Mira el detalle en la imagen:*"
+                        nombre_plan = "Plan Inicial"
+                    elif "_med_" in btn_id:
+                        img = IMG_MED_VE if pais_code == "ve" else IMG_MED_CL
+                        texto = f"🚀 *Plan Medio ({pais_nombre})*\n\n✅ 4 Posts semanales\n✅ 1 Reel + 2 Historias sem.\n✅ Copy + Diseños + Perfil\n\n👇 *Mira el detalle en la imagen:*"
+                        nombre_plan = "Plan Medio"
+                    elif "_ava_" in btn_id:
+                        img = IMG_AVA_VE if pais_code == "ve" else IMG_AVA_CL
+                        texto = f"💎 *Plan Avanzado ({pais_nombre})*\n\n✅ 5 Posts semanales\n✅ 2 Reels + 3 Historias sem.\n✅ Copy + Diseños + Perfil\n🎁 Stickers Personalizados\n\n👇 *Mira el detalle en la imagen:*"
+                        nombre_plan = "Plan Avanzado"
+
+                    registrar_lead(nombre, numero, pais_nombre, nombre_plan)
+                    enviar(numero, "image", img, caption=texto) 
+                    botones_navegacion(numero, pais_code)
+
+                elif "dsn_" in btn_id:
+                    pais = "VE" if "_ve" in btn_id else "CL"
+                    enviar(numero, "image", IMG_DISENO, caption=f"🎨 *Diseño Gráfico ({pais})*\nLogos, Flyers, Videos y más.\nMira nuestro catálogo visual 👆")
+                    registrar_lead(nombre, numero, "Venezuela" if pais=="VE" else "Chile", "Diseño")
+                    botones = {"type": "button", "body": {"text": "¿Qué deseas hacer?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{'ve' if pais=='VE' else 'cl'}", "title": "🙋 Cotizar"}}]}}
                     enviar(numero, "interactive", botones)
-                    registrar_lead(nombre, numero, "VE" if pais=="ve" else "CL", btn)
 
-                elif "dsn_" in btn:
-                    pais = "ve" if "_ve" in btn else "cl"
-                    enviar(numero, "image", IMG_DISENO, caption="🎨 Catálogo de Diseño")
-                    btns = {"type": "button", "body": {"text": "¿Te interesa?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{pais}", "title": "🙋 Cotizar"}}]}}
-                    enviar(numero, "interactive", btns)
-                    registrar_lead(nombre, numero, "VE" if pais=="ve" else "CL", "Diseño")
-
-                elif "inf_" in btn:
-                    pais = "ve" if "_ve" in btn else "cl"
-                    txt = "🇻🇪 Pagos VE: Binance, Pago Móvil" if pais == "ve" else "🇨🇱 Pagos CL: Banco Estado, RUT"
-                    enviar(numero, "text", txt)
-                    btns = {"type": "button", "body": {"text": "¿Dudas?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{pais}", "title": "🙋 Hablar con Asesor"}}]}}
-                    enviar(numero, "interactive", btns)
+                elif "inf_" in btn_id:
+                    if "_ve" in btn_id:
+                        enviar(numero, "text", "🇻🇪 *Pagos VE*\n- Binance (USDT)\n- Efectivo ($/Bs)\n- Pago Móvil")
+                    else:
+                        enviar(numero, "text", "🇨🇱 *Pagos CL*\n- Transferencia Banco Estado / RUT\n- Pesos Chilenos")
+                    
+                    botones = {"type": "button", "body": {"text": "¿Dudas?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{'ve' if '_ve' in btn_id else 'cl'}", "title": "🙋 Hablar con Asesor"}}]}}
+                    enviar(numero, "interactive", botones)
                 
-                elif "humano_" in btn:
-                    pais = "Venezuela" if "_ve" in btn else "Chile"
+                elif "humano_" in btn_id:
+                    pais = "Venezuela" if "_ve" in btn_id else "Chile"
                     gestionar_humano(numero, nombre, pais)
 
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"status": "error"}), 500
-    return "OK", 200
+        print(f"Error procesando mensaje: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+    return jsonify({"status": "success"}), 200
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
