@@ -34,9 +34,10 @@ IMG_DISENO = f"{BASE_URL}/catalogo_diseno.jpg"
 NUMERO_ADMIN = "584265168669" 
 # ==========================================
 
-# --- MEMORIA DEL BOT (Evita repeticiones de Meta) ---
+# --- MEMORIA DEL BOT ---
 usuarios_activos = {}
-mensajes_procesados = [] # Lista para recordar IDs de mensajes ya respondidos
+mensajes_procesados = []
+memoria_clientes = {} 
 
 def es_spam(telefono):
     ahora = time.time()
@@ -102,25 +103,46 @@ def menu_pais(telefono, nombre):
     botones = {
         "type": "button",
         "body": {"text": f"👋 *¡Hola {nombre}!* Gracias por escribir a Peluches Marketing.\n\nPara mostrarte los precios y moneda correcta, selecciona tu ubicación 👇"},
-        "action": {"buttons": [{"type": "reply", "reply": {"id": "pais_ve", "title": "🇻🇪 Venezuela"}}, {"type": "reply", "reply": {"id": "pais_cl", "title": "🇨🇱 Chile"}}]}
+        "action": {
+            "buttons": [
+                {"type": "reply", "reply": {"id": "pais_ve", "title": "🇻🇪 Venezuela"}}, 
+                {"type": "reply", "reply": {"id": "pais_cl", "title": "🇨🇱 Chile"}},
+                {"type": "reply", "reply": {"id": "pais_otros", "title": "🌎 Otros países"}}
+            ]
+        }
     }
     enviar(telefono, "interactive", botones)
 
 def menu_servicios(telefono, pais_code):
-    bandera = "🇻🇪" if pais_code == "ve" else "🇨🇱"
+    if pais_code == "ve": bandera, titulo = "🇻🇪", "VENEZUELA"
+    elif pais_code == "cl": bandera, titulo = "🇨🇱", "CHILE"
+    else: bandera, titulo = "🌎", "INTERNACIONAL"
+
     botones = {
         "type": "button",
-        "body": {"text": f"{bandera} *Menú {pais_code.upper()}*\nSelecciona qué deseas cotizar:"},
-        "action": {"buttons": [{"type": "reply", "reply": {"id": f"mkt_{pais_code}", "title": "📱 Redes Sociales"}}, {"type": "reply", "reply": {"id": f"dsn_{pais_code}", "title": "🎨 Diseño Gráfico"}}, {"type": "reply", "reply": {"id": f"inf_{pais_code}", "title": "❓ Info Pagos"}}]}
+        "body": {"text": f"{bandera} *Menú {titulo}*\nSelecciona qué deseas cotizar:"},
+        "action": {
+            "buttons": [
+                {"type": "reply", "reply": {"id": f"mkt_{pais_code}", "title": "📱 Redes Sociales"}}, 
+                {"type": "reply", "reply": {"id": f"dsn_{pais_code}", "title": "🎨 Diseño Gráfico"}}, 
+                {"type": "reply", "reply": {"id": f"inf_{pais_code}", "title": "❓ Info Pagos"}}
+            ]
+        }
     }
     enviar(telefono, "interactive", botones)
 
 def submenu_planes_redes(telefono, pais_code):
-    bandera = "🇻🇪" if pais_code == "ve" else "🇨🇱"
+    bandera = "🇻🇪" if pais_code == "ve" else "🇨🇱" if pais_code == "cl" else "🌎"
     botones = {
         "type": "button",
         "body": {"text": f"{bandera} *Planes de Redes Sociales*\n\nManejamos 3 estrategias integrales. Toca cada botón para ver qué incluye 👇"},
-        "action": {"buttons": [{"type": "reply", "reply": {"id": f"plan_ini_{pais_code}", "title": "🌱 Plan Inicial"}}, {"type": "reply", "reply": {"id": f"plan_med_{pais_code}", "title": "🚀 Plan Medio"}}, {"type": "reply", "reply": {"id": f"plan_ava_{pais_code}", "title": "💎 Plan Avanzado"}}]}
+        "action": {
+            "buttons": [
+                {"type": "reply", "reply": {"id": f"plan_ini_{pais_code}", "title": "🌱 Plan Inicial"}}, 
+                {"type": "reply", "reply": {"id": f"plan_med_{pais_code}", "title": "🚀 Plan Medio"}}, 
+                {"type": "reply", "reply": {"id": f"plan_ava_{pais_code}", "title": "💎 Plan Avanzado"}}
+            ]
+        }
     }
     enviar(telefono, "interactive", botones)
 
@@ -128,7 +150,12 @@ def botones_navegacion(telefono, pais_code):
     botones = {
         "type": "button",
         "body": {"text": "¿Qué deseas hacer ahora?"},
-        "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{pais_code}", "title": "🙋 Contratar/Dudas"}}, {"type": "reply", "reply": {"id": f"mkt_{pais_code}", "title": "🔙 Ver Otros Planes"}}]}
+        "action": {
+            "buttons": [
+                {"type": "reply", "reply": {"id": f"humano_{pais_code}", "title": "🙋 Contratar/Dudas"}}, 
+                {"type": "reply", "reply": {"id": f"mkt_{pais_code}", "title": "🔙 Ver Otros Planes"}}
+            ]
+        }
     }
     enviar(telefono, "interactive", botones)
 
@@ -165,59 +192,122 @@ def recibir():
             msg_id = msg["id"]
             nombre = entry["contacts"][0]["profile"]["name"]
             
-            # 🛑 1. FILTRO ANTI-REPETICIÓN DE META
+            # 🛑 1. FILTRO ANTI-REPETICIÓN
             global mensajes_procesados
             if msg_id in mensajes_procesados:
                 return jsonify({"status": "ignored", "reason": "duplicate"}), 200
             
-            # Guardamos el ID en la memoria
             mensajes_procesados.append(msg_id)
             if len(mensajes_procesados) > 500:
-                mensajes_procesados.pop(0) # Limpiamos memoria para que no se llene el servidor
+                mensajes_procesados.pop(0)
             
-            # 🛑 2. FILTRO ANTI-SPAM DEL USUARIO
+            # 🛑 2. FILTRO ANTI-SPAM
             if es_spam(numero): return "Spam", 200
             
             marcar_leido(msg_id)
 
             if msg["type"] == "text":
                 txt = msg["text"]["body"].lower()
-                if any(x in txt for x in ["hola", "info", "buenas", "precio", "cotizar", "buenos"]):
+                mensaje_original = msg["text"]["body"] # Guardamos el texto original con mayúsculas y minúsculas
+                
+                # --- RESPUESTAS INTELIGENTES (FAQ) ---
+                if any(x in txt for x in ["ubicacion", "ubicación", "donde estan", "dónde están", "donde son"]):
+                    enviar(numero, "text", "📍 *Nuestra Ubicación*\nSomos una agencia 100% digital. Trabajamos de forma remota para brindar atención rápida a todo Chile, Venezuela y el mundo. 🌍")
+                elif any(x in txt for x in ["portafolio", "trabajos", "ejemplos", "instagram"]):
+                    enviar(numero, "text", "🎨 *Nuestro Portafolio*\nPuedes ver la calidad de nuestro trabajo directamente en nuestro Instagram:\n👉 https://instagram.com/invpeluches2812\n\n(O pide hablar con un humano para enviarte ejemplos específicos).")
+                elif any(x in txt for x in ["horario", "hora", "a que hora"]):
+                    enviar(numero, "text", "⏰ *Horario de Atención*\nEstamos activos de Lunes a Domingo, de 8:00 AM a 10:00 PM (Hora Venezuela).")
+
+                # --- LÓGICA DE SALUDO Y MEMORIA ---
+                elif any(x in txt for x in ["hola", "info", "buenas", "precio", "cotizar", "buenos"]):
                     enviar(numero, "reaction", msg_id, "👋")
-                    menu_pais(numero, nombre)
-                    registrar_lead(nombre, numero, "Inicio", "Saludo")
+                    
+                    global memoria_clientes
+                    if numero in memoria_clientes:
+                        pais_recordado = memoria_clientes[numero]
+                        enviar(numero, "text", f"¡Hola de nuevo, {nombre}! 👋 Qué gusto verte por aquí otra vez.")
+                        menu_servicios(numero, pais_recordado)
+                        registrar_lead(nombre, numero, pais_recordado.upper(), "Cliente Frecuente")
+                    else:
+                        menu_pais(numero, nombre)
+                        registrar_lead(nombre, numero, "Inicio", "Saludo")
+                
                 elif "asesor" in txt or "humano" in txt:
                     gestionar_humano(numero, nombre, "General")
+
+                # --- 🛡️ LA RED DE SEGURIDAD (Si no entendió nada de lo anterior) ---
+                else:
+                    # 1. Le respondemos al cliente
+                    botones_fallback = {
+                        "type": "button",
+                        "body": {"text": "🤖 ¡Ups! Soy el asistente virtual y aún estoy aprendiendo, por lo que no reconocí ese mensaje.\n\nPara ayudarte rápidamente, elige una opción 👇"},
+                        "action": {
+                            "buttons": [
+                                {"type": "reply", "reply": {"id": "ver_menu_principal", "title": "📋 Ver Menú"}},
+                                {"type": "reply", "reply": {"id": "pedir_humano", "title": "🙋 Hablar con Asesor"}}
+                            ]
+                        }
+                    }
+                    enviar(numero, "interactive", botones_fallback)
+                    
+                    # 2. TE AVISAMOS A TI (Al Admin)
+                    alerta_admin = f"⚠️ *MENSAJE FUERA DEL MENÚ*\n👤 De: {nombre}\n📱 Nro: {numero}\n💬 Dijo: \"{mensaje_original}\""
+                    enviar(NUMERO_ADMIN, "text", alerta_admin)
 
             elif msg["type"] == "interactive":
                 btn_id = msg["interactive"]["button_reply"]["id"]
                 enviar(numero, "reaction", msg_id, "✅")
 
-                if btn_id == "pais_ve": 
+                # --- RED DE SEGURIDAD (ACCIONES DE LOS BOTONES) ---
+                if btn_id == "ver_menu_principal":
+                    if numero in memoria_clientes:
+                        menu_servicios(numero, memoria_clientes[numero])
+                    else:
+                        menu_pais(numero, nombre)
+                elif btn_id == "pedir_humano":
+                    pais_recordado = memoria_clientes.get(numero, "General")
+                    pais_nombre = "Venezuela" if pais_recordado == "ve" else "Chile" if pais_recordado == "cl" else "Internacional" if pais_recordado == "otros" else "General"
+                    gestionar_humano(numero, nombre, pais_nombre)
+
+                # --- SELECCIÓN DE PAÍS ---
+                elif btn_id == "pais_ve": 
+                    memoria_clientes[numero] = "ve"
                     menu_servicios(numero, "ve")
                     registrar_lead(nombre, numero, "Venezuela", "Selección País")
                 elif btn_id == "pais_cl": 
+                    memoria_clientes[numero] = "cl"
                     menu_servicios(numero, "cl")
                     registrar_lead(nombre, numero, "Chile", "Selección País")
+                elif btn_id == "pais_otros": 
+                    memoria_clientes[numero] = "otros"
+                    menu_servicios(numero, "otros")
+                    registrar_lead(nombre, numero, "Otros Países", "Selección País")
 
+                # --- SUBMENÚ REDES ---
                 elif "mkt_" in btn_id:
-                    pais = "ve" if "_ve" in btn_id else "cl"
-                    submenu_planes_redes(numero, pais)
+                    pais_code = btn_id.split("_")[1] 
+                    submenu_planes_redes(numero, pais_code)
 
+                # --- DETALLE DE PLANES ---
                 elif "plan_" in btn_id:
-                    pais_nombre = "Venezuela" if "_ve" in btn_id else "Chile"
-                    pais_code = "ve" if "_ve" in btn_id else "cl"
+                    pais_code = btn_id.split("_")[2] 
                     
+                    if pais_code == "ve": pais_nombre = "Venezuela"
+                    elif pais_code == "cl": pais_nombre = "Chile"
+                    else: pais_nombre = "Internacional"
+
+                    img_code = "ve" if pais_code == "otros" else pais_code
+
                     if "_ini_" in btn_id:
-                        img = IMG_INI_VE if pais_code == "ve" else IMG_INI_CL
+                        img = IMG_INI_VE if img_code == "ve" else IMG_INI_CL
                         texto = f"🌱 *Plan Inicial ({pais_nombre})*\n\n✅ 3 Posts semanales\n✅ 2 Historias semanales\n✅ Copy + Diseños + Perfil\n\n👇 *Mira el detalle en la imagen:*"
                         nombre_plan = "Plan Inicial"
                     elif "_med_" in btn_id:
-                        img = IMG_MED_VE if pais_code == "ve" else IMG_MED_CL
+                        img = IMG_MED_VE if img_code == "ve" else IMG_MED_CL
                         texto = f"🚀 *Plan Medio ({pais_nombre})*\n\n✅ 4 Posts semanales\n✅ 1 Reel + 2 Historias sem.\n✅ Copy + Diseños + Perfil\n\n👇 *Mira el detalle en la imagen:*"
                         nombre_plan = "Plan Medio"
                     elif "_ava_" in btn_id:
-                        img = IMG_AVA_VE if pais_code == "ve" else IMG_AVA_CL
+                        img = IMG_AVA_VE if img_code == "ve" else IMG_AVA_CL
                         texto = f"💎 *Plan Avanzado ({pais_nombre})*\n\n✅ 5 Posts semanales\n✅ 2 Reels + 3 Historias sem.\n✅ Copy + Diseños + Perfil\n🎁 Stickers Personalizados\n\n👇 *Mira el detalle en la imagen:*"
                         nombre_plan = "Plan Avanzado"
 
@@ -225,25 +315,32 @@ def recibir():
                     enviar(numero, "image", img, caption=texto) 
                     botones_navegacion(numero, pais_code)
 
+                # --- DISEÑO GRÁFICO ---
                 elif "dsn_" in btn_id:
-                    pais = "VE" if "_ve" in btn_id else "CL"
-                    enviar(numero, "image", IMG_DISENO, caption=f"🎨 *Diseño Gráfico ({pais})*\nLogos, Flyers, Videos y más.\nMira nuestro catálogo visual 👆")
-                    registrar_lead(nombre, numero, "Venezuela" if pais=="VE" else "Chile", "Diseño")
-                    botones = {"type": "button", "body": {"text": "¿Qué deseas hacer?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{'ve' if pais=='VE' else 'cl'}", "title": "🙋 Cotizar"}}]}}
+                    pais_code = btn_id.split("_")[1]
+                    pais_nombre = "Chile" if pais_code == "cl" else "Internacional" if pais_code == "otros" else "Venezuela"
+                    
+                    enviar(numero, "image", IMG_DISENO, caption=f"🎨 *Diseño Gráfico ({pais_nombre})*\nLogos, Flyers, Videos y más.\nMira nuestro catálogo visual 👆")
+                    registrar_lead(nombre, numero, pais_nombre, "Diseño")
+                    botones = {"type": "button", "body": {"text": "¿Qué deseas hacer?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{pais_code}", "title": "🙋 Cotizar"}}]}}
                     enviar(numero, "interactive", botones)
 
+                # --- INFO PAGOS ---
                 elif "inf_" in btn_id:
-                    if "_ve" in btn_id:
-                        enviar(numero, "text", "🇻🇪 *Pagos VE*\n- Binance (USDT)\n- Efectivo ($/Bs)\n- Pago Móvil")
+                    pais_code = btn_id.split("_")[1]
+                    if pais_code == "ve" or pais_code == "otros":
+                        enviar(numero, "text", "🌎 *Pagos Internacionales / VE*\n- Binance (USDT)\n- PayPal\n- APP Retorna\n- Efectivo ($/Bs)\n- Pago Móvil (Solo VE)")
                     else:
                         enviar(numero, "text", "🇨🇱 *Pagos CL*\n- Transferencia Banco Estado / RUT\n- Pesos Chilenos")
                     
-                    botones = {"type": "button", "body": {"text": "¿Dudas?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{'ve' if '_ve' in btn_id else 'cl'}", "title": "🙋 Hablar con Asesor"}}]}}
+                    botones = {"type": "button", "body": {"text": "¿Dudas?"}, "action": {"buttons": [{"type": "reply", "reply": {"id": f"humano_{pais_code}", "title": "🙋 Hablar con Asesor"}}]}}
                     enviar(numero, "interactive", botones)
                 
+                # --- HABLAR CON HUMANO ---
                 elif "humano_" in btn_id:
-                    pais = "Venezuela" if "_ve" in btn_id else "Chile"
-                    gestionar_humano(numero, nombre, pais)
+                    pais_code = btn_id.split("_")[1]
+                    pais_nombre = "Chile" if pais_code == "cl" else "Internacional" if pais_code == "otros" else "Venezuela"
+                    gestionar_humano(numero, nombre, pais_nombre)
 
     except Exception as e:
         print(f"Error procesando mensaje: {e}")
