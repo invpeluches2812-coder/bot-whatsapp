@@ -46,7 +46,7 @@ def es_spam(telefono):
     usuarios_activos[telefono] = ahora
     return False
 
-# --- CRM GOOGLE SHEETS ---
+# --- CRM GOOGLE SHEETS (NUEVO TRUCO DE FILA 2) ---
 def registrar_lead(nombre, telefono, pais, interes):
     try:
         if not GOOGLE_JSON: return
@@ -60,7 +60,10 @@ def registrar_lead(nombre, telefono, pais, interes):
         fecha = hora_vzla.strftime("%Y-%m-%d")
         hora = hora_vzla.strftime("%H:%M:%S")
         
-        sheet.append_row([fecha, hora, nombre, telefono, pais, interes])
+        # Insertamos siempre en la fila 2 para empujar los viejos hacia abajo
+        datos = [fecha, hora, nombre, telefono, pais, interes]
+        sheet.insert_row(datos, index=2)
+        
         print(f"✅ Lead guardado: {nombre}")
     except Exception as e:
         print(f"❌ Error Sheets: {e}")
@@ -208,7 +211,7 @@ def recibir():
 
             if msg["type"] == "text":
                 txt = msg["text"]["body"].lower()
-                mensaje_original = msg["text"]["body"] # Guardamos el texto original con mayúsculas y minúsculas
+                mensaje_original = msg["text"]["body"] 
                 
                 # --- RESPUESTAS INTELIGENTES (FAQ) ---
                 if any(x in txt for x in ["ubicacion", "ubicación", "donde estan", "dónde están", "donde son"]):
@@ -235,9 +238,8 @@ def recibir():
                 elif "asesor" in txt or "humano" in txt:
                     gestionar_humano(numero, nombre, "General")
 
-                # --- 🛡️ LA RED DE SEGURIDAD (Si no entendió nada de lo anterior) ---
+                # --- 🛡️ LA RED DE SEGURIDAD ---
                 else:
-                    # 1. Le respondemos al cliente
                     botones_fallback = {
                         "type": "button",
                         "body": {"text": "🤖 ¡Ups! Soy el asistente virtual y aún estoy aprendiendo, por lo que no reconocí ese mensaje.\n\nPara ayudarte rápidamente, elige una opción 👇"},
@@ -250,7 +252,6 @@ def recibir():
                     }
                     enviar(numero, "interactive", botones_fallback)
                     
-                    # 2. TE AVISAMOS A TI (Al Admin)
                     alerta_admin = f"⚠️ *MENSAJE FUERA DEL MENÚ*\n👤 De: {nombre}\n📱 Nro: {numero}\n💬 Dijo: \"{mensaje_original}\""
                     enviar(NUMERO_ADMIN, "text", alerta_admin)
 
@@ -258,7 +259,7 @@ def recibir():
                 btn_id = msg["interactive"]["button_reply"]["id"]
                 enviar(numero, "reaction", msg_id, "✅")
 
-                # --- RED DE SEGURIDAD (ACCIONES DE LOS BOTONES) ---
+                # --- RED DE SEGURIDAD (ACCIONES) ---
                 if btn_id == "ver_menu_principal":
                     if numero in memoria_clientes:
                         menu_servicios(numero, memoria_clientes[numero])
